@@ -218,3 +218,76 @@ func (s *TcpChatServer) Broadcast(command interface{}) error {
 	}
 	return nil
 }
+
+// client :
+
+type ChatClient interface {
+	Dial(address string) error
+	Send(command interface{}) error
+	SendMessage(message string) error
+	SetName(name string) error
+	Start()
+	Close()
+	Incoming() chan protocol.MessageCommand
+}
+
+// The client can connect to the server using the Dial() method, and the Start() and Close() methods are used to start and stop the client.
+// Send() are used to send the command to the server, and SetName() and SendMessage() are wrapper methods to set the display name and send the chat message.
+//  Finally, the Incoming() method returns a channel for retrieving chat messages from the server.
+
+// The structure of the client and its constructor can be defined as follows.
+// The following code has some private variables that consider conn for connections and reader/writer as wrapper constructs for sending commands.
+
+type TcpChatClient struct {
+	conn      net.Conn
+	cmdReader *protocol.CommandReader
+	cmdWriter *protocol.CommandWriter
+	name      string
+	incoming  chan protocol.MessageCommand
+}
+
+func NewClient() *TcpChatClient {
+	return &TcpChatClient{
+		incoming: make(chan protocol.MessageCommand),
+	}
+}
+
+// Most of the methods are quite simple. Dial establishes a connection with the server,
+//  and then the reader and writer of the protocol are created.
+
+func (c *TcpChatClient) Dial(address string) error {
+	conn, err := net.Dial("tcp", address)
+	if err == nil {
+		c.conn = conn
+	}
+	c.cmdReader = protocol.NewCommandReader(conn)
+	c.cmdWriter = protocol.NewCommandWriter(conn)
+	return err
+}
+
+// Then the Send() method uses the cmdWriter to send the command to the server.
+
+func (c *TcpChatClient) Send(command interface{}) error {
+	return c.cmdWriter.Write(command)
+}
+
+// The most important client method is the Start() method, which listens for incoming messages and then returns them to the channel.
+
+func (c *TcpChatClient) Start() {
+	for {
+		cmd, err := c.cmdReader.Read()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			log.Printf("Read error %v", err)
+		}
+		if cmd != nil {
+			switch v := cmd.(type) {
+			case protocol.MessageCommand:
+				c.incoming <- v
+			default:
+				log.Printf("Unknown command: %v", v)
+			}
+		}
+	}
+}
